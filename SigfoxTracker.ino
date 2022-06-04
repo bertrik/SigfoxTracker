@@ -2,7 +2,7 @@
 #include <math.h>
 
 #include "SoftwareSerial.h"
-#include "TinyGPS.h"
+#include "TinyGPSPlus.h"
 #include "IO_WSSFM10.h"
 
 #define GPS_BAUD        9600
@@ -15,8 +15,8 @@
 #define print Serial.printf
 
 static SoftwareSerial gps_serial(PIN_GPS_RX);
-static TinyGPS gps;
-static IO_WSSFM10 sigfox(PIN_SIGFOX_RX, PIN_SIGFOX_TX, true);
+static TinyGPSPlus gps;
+static IO_WSSFM10 sigfox(PIN_SIGFOX_RX, PIN_SIGFOX_TX, false);
 
 void setup(void)
 {
@@ -28,9 +28,10 @@ void setup(void)
 
     gps_serial.begin(GPS_BAUD);
 
-//    sigfox.begin();
-//    print("SigFox ID  = %s", sigfox.getID().c_str());
-//    print("SigFox PAC = %s", sigfox.getPAC().c_str());
+    sigfox.begin();
+    print("SigFox status = %s\n", sigfox.test().c_str());
+    print("SigFox ID     = %s\n", sigfox.getID().c_str());
+    print("SigFox PAC    = %s\n", sigfox.getPAC().c_str());
 }
 
 static size_t encode(uint8_t * buf, size_t size, float lat, float lon, float alt, int numsats)
@@ -57,7 +58,7 @@ static size_t encode(uint8_t * buf, size_t size, float lat, float lon, float alt
 // state variables
 static uint8_t buf[12];
 static float gps_lat, gps_lon, gps_alt;
-static int gps_numsats = 0;
+static int gps_sats = 0;
 static bool gps_have_new = false;
 static int period_last = -1;
 
@@ -70,20 +71,15 @@ void loop(void)
     while (gps_serial.available()) {
         char c = gps_serial.read();
         if (gps.encode(c)) {
-            float lat, lon;
-            unsigned long age;
-            gps.f_get_position(&lat, &lon, &age);
-            if (age < 2000) {
-                // fix is recent
-                gps_lat = lat;
-                gps_lon = lon;
-                gps_alt = gps.f_altitude();
-                gps_numsats = gps.satellites();
+            if (gps.location.isUpdated() && gps.altitude.isUpdated() && gps.satellites.isUpdated()) {
+                gps_lat = gps.location.lat();
+                gps_lon = gps.location.lng();
+                gps_alt = gps.altitude.meters();
+                gps_sats = gps.satellites.value();
                 gps_have_new = true;
+                print("lat=%.6f,lon=%.6f,alt=%.1f,num=%d\n", gps_lat, gps_lon, gps_alt, gps_sats);
+                break;
             }
-            print("lat=%.6f,lon=%.6f,alt=%.1f,num=%d,age=%lu\n", gps_lat, gps_lon, gps_alt,
-                  gps_numsats, age);
-            break;
         }
     }
 
@@ -95,10 +91,11 @@ void loop(void)
             period_last = period;
             gps_have_new = false;
 
-            int len = encode(buf, sizeof(buf), gps_lat, gps_lon, gps_alt, gps_numsats);
+            int len = encode(buf, sizeof(buf), gps_lat, gps_lon, gps_alt, gps_sats);
             for (int i = 0; i < len; i++) {
                 print(" %02X", buf[i]);
             }
+            print("\n");
         }
     }
 }
